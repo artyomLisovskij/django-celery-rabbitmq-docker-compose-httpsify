@@ -1,0 +1,150 @@
+version: '3.4'
+
+services:
+  rabbitmq:
+    container_name: rabbitmq
+    hostname: rabbitmq
+    image: rabbitmq:latest
+    networks:
+      - main
+    restart: on-failure
+
+  postgres:
+    container_name: postgres
+    hostname: postgres
+    image: postgres:latest
+    environment:
+      - POSTGRES_USER=puser
+      - POSTGRES_PASSWORD=ppassword
+      - POSTGRES_DB=postgres
+    networks:
+      - main
+    restart: on-failure
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    command: sh -c "wait-for postgres:5432 && wait-for redis:6379 && python manage.py collectstatic --no-input && yes | python manage.py makemigrations main && python manage.py migrate && gunicorn mysite.wsgi -b 0.0.0.0:8000 --reload --enable-stdio-inheritance"
+    #command: sh -c "python manage.py collectstatic --no-input && yes | python manage.py makemigrations main && python manage.py migrate && gunicorn mysite.wsgi -b 0.0.0.0:8000 --reload --enable-stdio-inheritance"
+    container_name: app
+    depends_on:
+      - postgres
+      - rabbitmq
+      - redis
+    hostname: app
+    image: app-image
+    volumes:
+      - .:/usr/src/app
+      - static:/static
+    networks:
+      - main
+    restart: on-failure
+    environment:
+      - DJANGO_SETTINGS_MODULE=mysite.settings.production
+      - SECRET_KEY=somesecret
+    container_name: app
+
+  redis:
+    image: redis
+
+  celery_worker:
+    command: sh -c "wait-for rabbitmq:5672 && wait-for app:8000 -- celery -A mysite worker -l info"
+    container_name: celery_worker
+    depends_on:
+      - app
+      - postgres
+      - rabbitmq
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 50M
+        reservations:
+          cpus: '0.25'
+          memory: 20M
+    hostname: celery_worker
+    image: app-image
+    networks:
+      - main
+    restart: on-failure
+
+  c9:
+    image: shuosc/c9:latest
+    ports:
+      - "9000:80"
+    expose:
+      - "9000"
+    volumes:
+      - .:/root/workspace
+    environment:
+      - workspace=/root/workspace
+      - user=c9
+      - pass=password
+    restart: always
+
+  celery_beat:
+    command: sh -c "wait-for rabbitmq:5672 && wait-for app:8000 -- celery -A mysite beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler"
+    container_name: celery_beat
+    depends_on:
+      - app
+      - postgres
+      - rabbitmq
+    hostname: celery_beat
+    image: app-image
+    networks:
+      - main
+    restart: on-failure
+
+  nginx:
+    container_name: nginx
+    command: wait-for app:8000 -- nginx -g "daemon off;"
+    depends_on:
+      - app
+    #  - frontend
+    image: nginx:alpine
+    networks:
+      - main
+    #ports:
+    #  - "80:80"
+    restart: on-failure
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./wait-for:/bin/wait-for
+      - static:/var/www/app/static
+  
+  # frontend:
+  #   build: './frontend'
+  #   ports:
+  #     - "8080:8080"
+  #   container_name: frontend
+  #   hostname: frontend
+  #   image: frontend-image
+  #   volumes:
+  #     - ./frontend/src:/app/src
+  #   networks:
+  #     - main
+  #   restart: on-failure
+  
+  httpsify:
+    build: './https'
+    container_name: httpsify
+    command: --redirect
+    depends_on:
+      - nginx
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./httpsify:/.httpsify
+    networks:
+      - main
+networks:
+  main:
+
+volumes:
+  postgresql-data:
+  static:
