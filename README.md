@@ -1,4 +1,4 @@
-# django-celery-rabbitmq-docker-compose-httpsify
+# Docker-compose django with batteries kit. All in one
 This is docker-compose starter kit for webapp development.
 Include:
 - django
