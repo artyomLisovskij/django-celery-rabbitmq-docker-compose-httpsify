@@ -22,9 +22,13 @@ and your server is ready.
 
 Call 
 > docker-compose up --build
+
 again if you need to make migrations and migrate created models(automated on startup).
 You can also do it manually:
+
 > docker-compose exec app sh
+
 > python3 manage.py makemigrations
+
 and etc.
 
